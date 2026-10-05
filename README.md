@@ -20,8 +20,8 @@ Then launch your agent from this directory.
 | [`g2a-protocol`](https://github.com/dynamicagents/g2a-protocol) | the gatekeeper↔agent wire contract |
 | [`slack-gatekeeper`](https://github.com/dynamicagents/slack-gatekeeper) | the Slack-anchored gatekeeper |
 
-`slack-gatekeeper` depends on the contract and imports none of the agent runtime — the
-two must never share one. The agent side is a separate workspace,
+`slack-gatekeeper` hosts its built-in agents on `@dynamicagents/core` and calls them
+across the contract like any remote agent. The agent side is a separate workspace,
 [`dev-agents`](https://github.com/dynamicagents/dev-agents), which pins `g2a-protocol`
 too.
 

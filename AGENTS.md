@@ -6,13 +6,20 @@ contract that keeps it and the agent runtime from drifting apart.
 | repo | what it is |
 | ---- | ---------- |
 | [`g2a-protocol`](g2a-protocol/AGENTS.md) | the gatekeeper↔agent wire contract: constants and pure functions, no dependencies |
-| [`slack-gatekeeper`](slack-gatekeeper/AGENTS.md) | the Slack-anchored gatekeeper — routing, registration, the A2A crossing |
+| [`slack-gatekeeper`](slack-gatekeeper/AGENTS.md) | the Slack-anchored gatekeeper — routing, registration, the A2A crossing, and its built-in agents |
 
-`slack-gatekeeper` depends on `@dynamicagents/g2a-protocol` from the registry and
-**imports none of the agent runtime**. That is the whole point of the split: the
-gatekeeper and `@dynamicagents/core` must never share a runtime, and they can only
-both depend on the contract while depending on it costs nothing. Every rule in
-`g2a-protocol` follows from that one fact.
+`slack-gatekeeper` hosts its built-in agents — admin and onboarding — on
+`@dynamicagents/core`, as core tenants in its own Worker. It still **calls them
+through core's A2A edge exactly as it calls a remote agent**: the same gatekeeper
+token, the same push callback to `/a2a/notifications`, only handed over in-process.
+So `@dynamicagents/g2a-protocol` stays the one coupling on the wire, built-in or
+remote, and every rule in it — no dependencies above all — holds for the same reason
+as before: both sides of every crossing depend on it.
+
+Hosting core ties the gatekeeper to core's release train. Its `agents` and
+`@cloudflare/think` versions are bounded by core's peer ranges, so a dependency round
+here follows core's rather than running ahead of it, and it depends on core from the
+registry — a git ref is temporary, as it is everywhere in the train.
 
 The agent side lives in a separate workspace (`dev-agents`: `core`, `plugins`,
 `starter`). `g2a-protocol` is a submodule of both, pinned independently — each records
