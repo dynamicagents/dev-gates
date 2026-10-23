@@ -142,6 +142,11 @@ cannot run. Then fix it and reply naming the commit, or reply saying why not, an
 the thread either way, so it records what happened. The review summary can raise points
 that are not threads; read those too.
 
+**One Copilot review per PR, answered in one pass.** Every review is billed, and the one
+requested when a PR opens is the only one it gets. So never ask for another, and **never
+wait for a second review**: nothing will bring it. Fix what holds up, push, reply to and
+resolve every thread, and hand over.
+
 Resolving a thread is GraphQL-only:
 
 ```bash
@@ -170,7 +175,8 @@ The review is requested automatically, and exactly when is worth knowing:
 - **A draft gets no request** while it is a draft.
 - **A Dependabot PR gets no request**, ever.
 - **A push requests nothing.** The review of an earlier commit is the last one a PR gets
-  unless someone asks again — fixing Copilot's comments does not bring it back.
+  — fixing Copilot's comments does not bring it back, and a second review happens only
+  when a person requests one by hand.
 
 Finished is an event on the PR's timeline, not an absence of comments: a review can finish
 having left none. Copilot's latest review event answers it:
@@ -181,11 +187,12 @@ gh api repos/dynamicagents/<repo>/issues/<pr>/timeline --paginate --jq '
             or (.event=="reviewed" and .user.login=="Copilot")) | .event' | tail -n 1
 ```
 
-`reviewed` means done. `review_requested` means still working. No output means it was
-never asked, and waiting will not change that — a draft or a Dependabot PR, usually.
-Reviews here have landed from under two to about seven minutes after the request, so poll
-no faster than every thirty seconds, and stop after fifteen minutes rather than wait on a
-review that never started.
+`reviewed` means done, and for good: answer it and hand over rather than poll for
+another. `review_requested` means still working. No output means it was never asked, and
+waiting will not change that — a draft or a Dependabot PR, usually. Reviews here have
+landed from under two to about seven minutes after the request, so poll no faster than
+every thirty seconds, and stop after fifteen minutes rather than wait on a review that
+never started.
 
 ---
 
