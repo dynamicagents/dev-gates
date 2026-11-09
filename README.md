@@ -32,18 +32,12 @@ Claude Code reads that name.
 
 ## Skills
 
-Skills live in `.agents/skills/`, installed with the [`skills`](https://skills.sh) CLI and
-recorded in `skills-lock.json`. Claude Code reads `.claude/skills/`, which holds one
-symlink per skill and is generated:
-
-```bash
-npx skills add <pack>    # writes to .agents/skills/ only
-npm run skills           # link it where Claude Code will look
-```
-
-`npm run check` fails when those two drift, which is the point: the CLI knows nothing
-about `.claude/skills/`, and a skill that never got linked fails silently — nothing
-announces a skill it did not find.
+Skills live in `.agents/skills/`, with a link to each in `.claude/skills/`, which is where
+Claude Code reads them. Both are committed, so a clone carries its skills, and
+`skills-lock.json` records where each came from. The workspace's own skills are authored in
+[`dev-skills`](https://github.com/dynamicagents/dev-skills): `superproject`, which is how this
+workspace works and the scripts `npm run` calls, and `pull-requests`. The platform skills come
+from Cloudflare's and Vercel's own repositories.
 
 ## Commands
 
@@ -53,18 +47,13 @@ announces a skill it did not find.
 | `npm run check` | skill links and submodule structure are intact |
 | `npm run skills` | re-link `.claude/skills/` after adding or removing a skill |
 | `npm run sync` | put every submodule on its branch and fast-forward it |
-| `node scripts/submodules.mjs --pushed` | every pinned commit is on a remote — needs network, so it is not in `check` |
+| `node .agents/skills/superproject/scripts/submodules.mjs --pushed` | every pinned commit is on a remote. Needs the network, so it is not in `check` |
 
 ## The submodule pointers
 
-A pointer is a known-good combination, not a mirror. Every commit in a subrepo makes its
-pointer here stale, and that is the design — bump one deliberately rather than on every
-commit. `npm run check` never fails on staleness; it checks only that the submodules would
-survive a clone.
-
-`bootstrap` and `sync` leave the submodules on `main`. Plain `git submodule update` checks
-out the recorded *commit* and so detaches HEAD; these check out the branch and fast-forward
-it, and skip any submodule that is dirty or on a feature branch.
+A pointer is a known-good combination, not a mirror, and `bootstrap` and `sync` leave every
+submodule on its branch rather than a detached HEAD. The
+[`superproject`](.agents/skills/superproject/SKILL.md) skill has both rules and why.
 
 ## License
 

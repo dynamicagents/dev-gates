@@ -35,6 +35,7 @@ what was green for its own side, so the two pins may legitimately differ.
 | anything that signs, verifies, fetches, or reads config | the consumer, never the protocol |
 | Slack routing, registration, the A2A crossing | `slack-gatekeeper` |
 | the agent runtime's half of verification | `core`, in the other workspace |
+| a developer skill, or a script both workspaces run | [`dev-skills`](https://github.com/dynamicagents/dev-skills), then a skills update here |
 
 The test for `g2a-protocol` is two questions, and both must point that way: **must two
 repos spell it identically**, and **can they both import it from somewhere that already
@@ -73,6 +74,18 @@ npm run skills       # re-link .claude/skills after adding or removing a skill
 npm run sync         # put every submodule on its branch and fast-forward it
 ```
 
+**How this workspace works is the `superproject` skill**, and so are the scripts these
+commands run (`.agents/skills/superproject/scripts/`). Load it before cloning, syncing,
+editing `.gitmodules` or committing a gitlink. In short: `bootstrap` and `sync` leave every
+submodule on the branch `.gitmodules` declares, `main` for each, and never on a detached
+HEAD; every submodule url is HTTPS, and SSH is a global `insteadOf` of your own; a
+submodule pointer is a known-good combination, and a PR whose only change is a gitlink is
+never opened unprompted. The skill has the why of each.
+
+The `git+ssh://` line for `slackify-markdown` in slack-gatekeeper's `package-lock.json` is
+the lockfile case the skill's section on HTTPS remotes describes: changing it makes things
+worse.
+
 **Verify with `npm run check` in the repo you touched, not `npm test`.** Vitest
 transpiles specs without typechecking them, so a type error passes a green suite. Where
 `wrangler.jsonc` bindings or compat settings moved, run `npm run types` first and commit
@@ -84,140 +97,42 @@ deployed Worker — logs, Workflow instances, AI Gateway calls. It reads credent
 gitignored `.cf.env` and redacts them from all output, so the token never lands in shell
 history or in an agent's context. Prefer it to pasting a token anywhere.
 
-### Remotes are HTTPS, and SSH is yours alone
-
-`.gitmodules` spells every url `https://github.com/…`, and `npm run check` fails anything
-but that or a relative path — a relative url resolves against this repo's own remote, so it
-arrives by whatever transport the clone used. A committed url has to work in the
-least-equipped place that will ever read it, and that is not this laptop: a cloud session
-holds a GitHub token and no key, installs no `openssh-client`, and reaches the network
-through an HTTP gateway carrying no SSH. A token cannot be made into a key from in there,
-so `git@github.com:` is not slow — it is unreachable.
-
-Preferring SSH is a *local* matter, and git has the mechanism:
-
-```bash
-git config --global url."git@github.com:".insteadOf "https://github.com/"
-```
-
-Fetch and push then go over SSH while the recorded url stays HTTPS — `git clone` records
-the url it was **given**, not the rewritten one, so nothing about this is committed.
-
-**It has to be global.** A submodule is its own repository, reading its own config and
-yours but never the superproject's, so a rewrite in `dev-gates/.git/config` would
-work here and silently not in `g2a-protocol/` or `slack-gatekeeper/`.
-
-An existing checkout keeps the url `git submodule init` copied into it until
-`git submodule sync --recursive` moves it; `npm run bootstrap` runs that first.
-
-The `git+ssh://` line for `slackify-markdown` in slack-gatekeeper's `package-lock.json` is
-**not** the same problem. npm records the ssh spelling for a `github:` dependency because
-that is what pacote's `repoUrl()` returns, then downloads the codeload HTTPS tarball rather
-than cloning, precisely because the two match. Rewrite it to `git+https://` and they stop
-matching, and npm falls back to a real clone.
-
-### The submodule pointers
-
-A pointer is a **known-good combination**, not a mirror of each submodule's `main`. Every
-commit in a subrepo makes its pointer stale, and that is the design: bump one
-deliberately rather than on every commit. `npm run sync` moves the checkouts and reports
-which are ahead of their pin.
-
-`bootstrap` and `sync` both leave the submodules **on `main`**, not on a detached HEAD.
-Plain `git submodule update` — and `git clone --recurse-submodules` — check out the
-recorded *commit*, and a commit is not a branch, so they detach you and the next commit
-you write goes somewhere no branch can see. Neither touches a submodule with uncommitted
-changes, or one you have checked out onto a feature branch.
-
 ---
 
 ## Pull requests
 
-**Every Copilot review comment ends resolved.** Copilot reviews the PRs in these repos and
-in this workspace, and a PR is not ready to hand over while one of its threads is open.
-
-Resolved does not mean accepted. Read each comment against the code first — Copilot is
-often right, and sometimes confidently wrong about an API it has not read or behaviour it
-cannot run. Then fix it and reply naming the commit, or reply saying why not, and resolve
-the thread either way, so it records what happened. The review summary can raise points
-that are not threads; read those too.
-
-**One Copilot review per PR, answered in one pass.** Every review is billed, and the one
-requested when a PR opens is the only one it gets. So never ask for another, and **never
-wait for a second review**: nothing will bring it. Fix what holds up, push, reply to and
-resolve every thread, and hand over.
-
-Resolving a thread is GraphQL-only:
-
-```bash
-# The open threads, with the id both mutations take. `--paginate` walks every page of
-# threads — without it, a long review can look clean.
-gh api graphql --paginate -F o=dynamicagents -F r=<repo> -F n=<pr> -f query='
-  query($o:String!,$r:String!,$n:Int!,$endCursor:String){repository(owner:$o,name:$r){pullRequest(number:$n){
-    reviewThreads(first:100,after:$endCursor){pageInfo{hasNextPage endCursor} nodes{id isResolved path line
-      comments(first:1){nodes{author{login} body}}}}}}}' \
-  --jq '.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved|not)'
-
-gh api graphql -f id=<thread> -f body='<the fix and its commit, or why not>' -f query='
-  mutation($id:ID!,$body:String!){addPullRequestReviewThreadReply(
-    input:{pullRequestReviewThreadId:$id,body:$body}){comment{url}}}'
-
-gh api graphql -f id=<thread> -f query='
-  mutation($id:ID!){resolveReviewThread(input:{threadId:$id}){thread{isResolved}}}'
-```
-
-### Knowing Copilot has finished
-
-The review is requested automatically, and exactly when is worth knowing:
-
-- **Opening a PR ready for review into `main` requests it** — the `protect-main` ruleset
-  asks, and it covers no other branch.
-- **A draft gets no request** while it is a draft.
-- **A Dependabot PR gets no request**, ever.
-- **A push requests nothing.** The review of an earlier commit is the last one a PR gets
-  — fixing Copilot's comments does not bring it back, and a second review happens only
-  when a person requests one by hand.
-
-Finished is an event on the PR's timeline, not an absence of comments: a review can finish
-having left none. Copilot's latest review event answers it:
-
-```bash
-gh api repos/dynamicagents/<repo>/issues/<pr>/timeline --paginate --jq '
-  .[] | select((.event=="review_requested" and .requested_reviewer.login=="Copilot")
-            or (.event=="reviewed" and .user.login=="Copilot")) | .event' | tail -n 1
-```
-
-`reviewed` means done, and for good: answer it and hand over rather than poll for
-another. `review_requested` means still working. No output means it was never asked, and
-waiting will not change that — a draft or a Dependabot PR, usually. Reviews here have
-landed from under two to about seven minutes after the request, so poll no faster than
-every thirty seconds, and stop after fifteen minutes rather than wait on a review that
-never started.
+**Before opening, answering or merging a PR in any of these repos, load the
+`pull-requests` skill.** It holds the rules and the scripts: one Copilot review per PR,
+requested when it opens ready for review, answered in one pass with every thread replied
+to and resolved; never another review asked for, and never one waited for; and a merge
+only once the review has landed, because merging does not cancel one in progress.
 
 ---
 
 ## Skills
 
-Skills live in `.agents/skills/`. Claude Code reads `.claude/skills/`, which holds a
-symlink per skill and is **generated** — `npm run skills` after any change, and
-`npm run check` fails when the two drift.
+Skills live in `.agents/skills/`, and `.claude/skills/` holds a relative link to each,
+which is where Claude Code looks. Both are committed, so a clone carries its skills, and
+`skills-lock.json` records where each installed skill came from:
 
-```bash
-npx skills add <pack>    # writes to .agents/skills/ only
-npm run skills           # then link it where Claude Code will find it
-```
+- **`superproject` and `pull-requests`** are authored in
+  [`dynamicagents/dev-skills`](https://github.com/dynamicagents/dev-skills), which
+  `dev-agents` installs from too. Change one there, never here: the next update overwrites
+  this copy.
+- **The platform skills** come from Cloudflare's and Vercel's own repositories.
 
-The CLI knows nothing about `.claude/skills/`, and a skill that never got linked fails
-silently: nothing announces a skill it did not find. That is the whole reason the check
-exists.
+**The Cloudflare skills are the reference for the platform: use them instead of recalling
+it.** `cloudflare`, `wrangler`, `workers-best-practices`, `durable-objects` and `agents-sdk`
+retrieve current documentation rather than relying on training data, which for Workers APIs
+and limits goes stale fast. Reach for them before answering from memory about bindings,
+limits, compatibility dates, or Durable Object and Workflow rules. Neither this file nor a
+repo's own `AGENTS.md` should grow a third copy of what they already say.
 
-**The Cloudflare skills are the reference for the platform — use them instead of
-recalling it.** `cloudflare`, `wrangler`, `workers-best-practices`, `durable-objects` and
-`agents-sdk` are installed here and retrieve current documentation rather than relying on
-training data, which for Workers APIs and
-limits goes stale fast. Reach for them before answering from memory about bindings, limits,
-compatibility dates, or Durable Object and Workflow rules. Neither this file nor a repo's
-own `AGENTS.md` should grow a third copy of what they already say.
+Adding, removing and updating a skill, and why the install names two agents, are the
+`superproject` skill's, under its section on the skills a workspace installs. A dependency
+round updates them: `npx skills check`, then `npx skills update -p -y`, with the updated
+copies and `skills-lock.json` in the round's PR. `npm run check` fails on a skill with no
+link, because Claude Code does not announce a skill it never found.
 
 ---
 

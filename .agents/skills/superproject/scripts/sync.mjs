@@ -16,10 +16,18 @@
  *
  *   - **A submodule with uncommitted changes.** Moving a branch under a dirty
  *     tree is how you lose work you have not named yet.
- *   - **A submodule on some other branch.** You are mid-feature there. Checking
- *     out `main` under you loses no commits but loses your place, which a
- *     command you run for its side effect on *other* repos has no business
- *     doing.
+ *   - **A submodule on some other branch that its remote still has.** You are
+ *     mid-feature there. Checking out the declared branch under you loses no
+ *     commits but loses your place, which a command you run for its side effect
+ *     on *other* repos has no business doing.
+ *
+ * A branch its remote has **deleted** is the exception, because that is what a
+ * merged PR looks like from here: these repos delete a PR's branch as it merges.
+ * `git branch --merged` cannot tell instead — a squash merge puts none of the
+ * branch's commits on the declared branch. So a clean submodule on such a branch
+ * is moved to the declared branch, and the branch and its commits stay. It takes
+ * the remote saying so: a branch never pushed has no upstream, and a remote that
+ * does not answer has not said the branch is gone, so both are still left alone.
  *
  * `--ff-only` is the rest of the safety: a branch carrying local commits, or one
  * rewritten upstream, stops with its own message rather than being merged into
@@ -28,7 +36,7 @@
  * ## Symlinks first
  *
  * Run on its own it also re-materializes the symlinks a clone may have flattened,
- * before anything below — `scripts/symlinks.mjs` has the why. The order is not
+ * before anything below — `symlinks.mjs` has the why. The order is not
  * incidental: the checkouts and merges below write working trees, so the config
  * deciding how they spell a symlink has to be right before they run, and the
  * dirty-tree guard has to see a tree that has already been repaired rather than
@@ -44,11 +52,30 @@
  */
 
 import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { declared, git, tryGit, currentBranch, recordedCommit } from "./submodule-config.mjs";
 import { healWorkspace, reportHeal } from "./symlinks.mjs";
+import { workspaceRoot, isMain, help } from "./workspace.mjs";
 
-/** Returns [path, note] per submodule. `quiet` suppresses the fetch's stderr. */
+/**
+ * Whether `branch` tracks a branch its remote no longer has. Only a remote that
+ * answers can say so: no upstream, or no answer, is false.
+ */
+const upstreamDeleted = (dir, branch) => {
+  const remote = tryGit(["config", `branch.${branch}.remote`], dir);
+  const ref = tryGit(["config", `branch.${branch}.merge`], dir);
+  if (!remote || !ref) return false;
+  try {
+    execFileSync("git", ["ls-remote", "--exit-code", remote, ref], { cwd: dir, stdio: ["ignore", "pipe", "pipe"] });
+    return false;
+  } catch (error) {
+    // `--exit-code` makes "no such ref" exit 2; any other failure is not an answer.
+    return error.status === 2;
+  }
+};
+
+/** Returns [path, note] per submodule. */
 export const sync = (root) => {
   const results = [];
 
@@ -59,7 +86,10 @@ export const sync = (root) => {
       results.push([path, "no branch declared in .gitmodules — skipped"]);
       continue;
     }
-    if (!tryGit(["rev-parse", "--git-dir"], dir)) {
+    // `.git` rather than `rev-parse`, which from an uninitialized submodule's empty
+    // directory walks up and answers for the workspace, so everything below would act
+    // on the workspace instead of skipping the submodule.
+    if (!existsSync(join(dir, ".git"))) {
       results.push([path, "not initialized — run `npm run bootstrap`"]);
       continue;
     }
@@ -69,7 +99,8 @@ export const sync = (root) => {
     }
 
     const on = currentBranch(dir);
-    if (on !== null && on !== branch) {
+    const finished = on !== null && on !== branch && upstreamDeleted(dir, on);
+    if (on !== null && on !== branch && !finished) {
       results.push([path, `on \`${on}\`, not \`${branch}\` — left alone`]);
       continue;
     }
@@ -83,8 +114,9 @@ export const sync = (root) => {
       continue;
     }
 
-    if (on === null) {
-      // Detached, which is where `git submodule update` and a fresh clone leave you.
+    if (on !== branch) {
+      // Detached, which is where `git submodule update` and a fresh clone leave you,
+      // or on a branch its remote has deleted.
       if (!tryGit(["rev-parse", "--verify", "--quiet", branch], dir)) {
         try {
           git(["checkout", "-b", branch, `origin/${branch}`], dir);
@@ -117,11 +149,12 @@ export const sync = (root) => {
     const pinned = recordedCommit(root, path)?.slice(0, 7);
     const ahead = pinned && !tryGit(["rev-parse", "--short", "HEAD"], dir)?.startsWith(pinned.slice(0, 7));
 
+    const left = finished ? `left \`${on}\`, deleted upstream: ` : "";
     results.push([
       path,
       before === after
-        ? `up to date at ${after} (${branch})${ahead ? " — ahead of the pin" : ""}`
-        : `${before} → ${after} (${branch})${ahead ? " — ahead of the pin" : ""}`
+        ? `${left}up to date at ${after} (${branch})${ahead ? " — ahead of the pin" : ""}`
+        : `${left}${before} → ${after} (${branch})${ahead ? " — ahead of the pin" : ""}`
     ]);
   }
 
@@ -141,12 +174,21 @@ export const report = (results) => {
   }
 };
 
-if (import.meta.url === `file://${process.argv[1]}`) {
-  const root = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
+if (isMain(import.meta.url)) {
+  help(`
+Usage: node sync.mjs
+
+Put every submodule on the branch .gitmodules declares and fast-forward it from
+origin. Leaves alone a dirty submodule and one on a feature branch its remote
+still has; moves a clean one off a branch its remote has deleted. Reports which
+submodules are ahead of the recorded pointer and bumps none. Run from the
+workspace root.
+`);
+  const root = workspaceRoot();
   const healed = healWorkspace(root);
   reportHeal(healed);
   report(sync(root));
-  // Reported, then failed: the submodules below are still worth syncing and printing,
+  // Reported, then failed: the submodules above are still worth syncing and printing,
   // but a path left as a file is not something this run fixed, and a zero exit is how
   // that gets missed. `bootstrap` imports `sync` rather than running it, so this guard
   // is false there and it answers for its own heal.
