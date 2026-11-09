@@ -212,9 +212,9 @@ silently: nothing announces a skill it did not find. That is the whole reason th
 exists.
 
 **The Cloudflare skills are the reference for the platform — use them instead of
-recalling it.** `cloudflare`, `wrangler`, `workers-best-practices`, `durable-objects`,
-`agents-sdk`, `cloudflare-email-service` and `sandbox-sdk` are installed here and retrieve
-current documentation rather than relying on training data, which for Workers APIs and
+recalling it.** `cloudflare`, `wrangler`, `workers-best-practices`, `durable-objects` and
+`agents-sdk` are installed here and retrieve current documentation rather than relying on
+training data, which for Workers APIs and
 limits goes stale fast. Reach for them before answering from memory about bindings, limits,
 compatibility dates, or Durable Object and Workflow rules. Neither this file nor a repo's
 own `AGENTS.md` should grow a third copy of what they already say.
